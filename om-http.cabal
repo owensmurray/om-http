@@ -1,6 +1,6 @@
 cabal-version:       3.0
 name:                om-http
-version:             0.3.0.6
+version:             0.3.0.7
 synopsis:            Http utilities.
 description:         Random HTTP utilities.
 homepage:            https://github.com/owensmurray/om-http
