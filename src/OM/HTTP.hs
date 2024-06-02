@@ -17,23 +17,18 @@ module OM.HTTP (
   staticPage,
   defaultIndex,
   BearerToken(..),
+  emptyApp,
 ) where
 
-
-import Prelude (Either(Left, Right), Eq((/=), (==)), Foldable(elem,
-  foldr), Functor(fmap), Maybe(Just, Nothing), Monad((>>), (>>=), return),
-  MonadFail(fail), RealFrac(truncate), Semigroup((<>)), Show(show),
-  Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath, IO, Int,
-  String, concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, zip)
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently_)
 import Control.Exception.Safe (SomeException, bracket, finally, throwM,
   tryAny)
 import Control.Monad (join, void)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Logger (Loc, LogLevel, LogSource, LogStr,
-  MonadLoggerIO, logError, logInfo, runLoggingT)
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Control.Monad.Logger (LoggingT(runLoggingT), Loc, LogLevel,
+  LogSource, LogStr, MonadLoggerIO, logError, logInfo)
 import Data.ByteString (ByteString)
 import Data.List ((\\))
 import Data.Maybe (catMaybes)
@@ -46,20 +41,26 @@ import Data.UUID.V1 (nextUUID)
 import Data.Version (Version, showVersion)
 import Language.Haskell.TH (Code(examineCode), Q, TExp, runIO)
 import Language.Haskell.TH.Syntax (addDependentFile)
-import Network.HTTP.Types (Header, Status, internalServerError500,
-  methodNotAllowed405, movedPermanently301, ok200, statusCode,
-  statusMessage)
+import Network.HTTP.Types (Status(statusCode, statusMessage), Header,
+  internalServerError500, methodNotAllowed405, movedPermanently301,
+  ok200, status404)
 import Network.Mime (defaultMimeLookup)
 import Network.Socket (AddrInfo(addrAddress), Family(AF_INET),
   SocketType(Stream), Socket, close, connect, defaultProtocol,
   getAddrInfo, socket)
 import Network.Socket.ByteString (recv, sendAll)
-import Network.Wai (Application, Middleware, Response, ResponseReceived,
-  mapResponseHeaders, pathInfo, rawPathInfo, rawQueryString,
-  requestMethod, responseLBS, responseRaw, responseStatus)
+import Network.Wai (Request(pathInfo, rawPathInfo, rawQueryString,
+  requestMethod), Application, Middleware, Response, ResponseReceived,
+  mapResponseHeaders, responseLBS, responseRaw, responseStatus)
 import Network.Wai.Handler.Warp (run)
 import OM.Show (showt)
-import Servant.API (ToHttpApiData, toUrlPiece)
+import Prelude (Either(Left, Right), Eq((/=), (==)), Foldable(elem,
+  foldr), Functor(fmap), Maybe(Just, Nothing), Monad((>>), (>>=), return),
+  MonadFail(fail), Monoid(mempty), RealFrac(truncate), Semigroup((<>)),
+  Show(show), Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath,
+  IO, Int, String, concat, drop, filter, fst, id, mapM_, otherwise,
+  putStrLn, zip)
+import Servant.API (ToHttpApiData(toUrlPiece))
 import System.Directory (getDirectoryContents)
 import System.FilePath.Posix ((</>), combine)
 import System.Posix.Files (getFileStatus, isDirectory, isRegularFile)
@@ -75,7 +76,7 @@ import qualified Data.Text as T
   request logging, and sets the HSTS Directive header, and in the unlikely
   event of excptions it will also catch and log them.
 -}
-runTlsRedirect 
+runTlsRedirect
   :: (Loc -> LogSource -> LogLevel -> LogStr -> IO ()) {- ^ Logging backend. -}
   -> ByteString {- ^ Server name. -}
   -> Version {- ^ Server version. -}
@@ -206,7 +207,7 @@ requestLogging logging app req respond =
 
 
 {- |
-  Logs all exceptions, and returns a 500 Internal Server error. 
+  Logs all exceptions, and returns a 500 Internal Server error.
 
   This is useful because your wai framework won't always do what you
   expect when it encounters random exceptions. For instance, an exception
@@ -215,7 +216,7 @@ requestLogging logging app req respond =
   them more complicated). This middleware explicitly will not re-throw
   exceptions, unless those exceptions were encountered after the headers
   have already been sent, e.g. when using 'Network.Wai.StreamingBody'.
-  
+
   What it will do is generate a unique id for the exception and print
   that ID, so you can easily find it in the logs.
 -}
@@ -234,7 +235,7 @@ logExceptionsAndContinue logging app req respond = (`runLoggingT` logging) $
     errResponse uuid =
       responseLBS
         internalServerError500
-        [("Content-Type", "text/plain")] 
+        [("Content-Type", "text/plain")]
         ("Internal Server Error. Error ID: " <> showt uuid)
 
     getUUID :: (MonadIO m) => m UUID
@@ -278,7 +279,7 @@ sshConnect app req respond =
     connProxy read_ write =
       bracket
         (socket AF_INET Stream defaultProtocol)
-        (\so ->  close so `finally` write "") 
+        (\so ->  close so `finally` write "")
         (\so -> do
           connect so =<<
             (
@@ -423,5 +424,17 @@ staticSite baseDir = join . runIO $ do
         allContent
           <- mapM (fmap BS8.unpack . BS.readFile . combine baseDir) allFiles
         return (zip (drop 2 <$> allFiles) allContent)
+
+
+{-| A WAI 'Application' that returns 404 not found for everything. -}
+emptyApp :: Application
+emptyApp _req respond =
+  respond
+    (
+      responseLBS
+        status404
+        mempty
+        "not found"
+    )
 
 
