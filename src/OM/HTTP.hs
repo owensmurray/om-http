@@ -75,7 +75,7 @@ import qualified Data.Text as T
   request logging, and sets the HSTS Directive header, and in the unlikely
   event of excptions it will also catch and log them.
 -}
-runTlsRedirect 
+runTlsRedirect
   :: (Loc -> LogSource -> LogLevel -> LogStr -> IO ()) {- ^ Logging backend. -}
   -> ByteString {- ^ Server name. -}
   -> Version {- ^ Server version. -}
@@ -206,7 +206,7 @@ requestLogging logging app req respond =
 
 
 {- |
-  Logs all exceptions, and returns a 500 Internal Server error. 
+  Logs all exceptions, and returns a 500 Internal Server error.
 
   This is useful because your wai framework won't always do what you
   expect when it encounters random exceptions. For instance, an exception
@@ -215,7 +215,7 @@ requestLogging logging app req respond =
   them more complicated). This middleware explicitly will not re-throw
   exceptions, unless those exceptions were encountered after the headers
   have already been sent, e.g. when using 'Network.Wai.StreamingBody'.
-  
+
   What it will do is generate a unique id for the exception and print
   that ID, so you can easily find it in the logs.
 -}
@@ -234,7 +234,7 @@ logExceptionsAndContinue logging app req respond = (`runLoggingT` logging) $
     errResponse uuid =
       responseLBS
         internalServerError500
-        [("Content-Type", "text/plain")] 
+        [("Content-Type", "text/plain")]
         ("Internal Server Error. Error ID: " <> showt uuid)
 
     getUUID :: (MonadIO m) => m UUID
@@ -278,7 +278,7 @@ sshConnect app req respond =
     connProxy read_ write =
       bracket
         (socket AF_INET Stream defaultProtocol)
-        (\so ->  close so `finally` write "") 
+        (\so ->  close so `finally` write "")
         (\so -> do
           connect so =<<
             (
