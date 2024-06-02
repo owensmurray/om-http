@@ -20,20 +20,14 @@ module OM.HTTP (
 ) where
 
 
-import Prelude (Either(Left, Right), Eq((/=), (==)), Foldable(elem,
-  foldr), Functor(fmap), Maybe(Just, Nothing), Monad((>>), (>>=), return),
-  MonadFail(fail), RealFrac(truncate), Semigroup((<>)), Show(show),
-  Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath, IO, Int,
-  String, concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, zip)
-
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently_)
 import Control.Exception.Safe (SomeException, bracket, finally, throwM,
   tryAny)
 import Control.Monad (join, void)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Logger (Loc, LogLevel, LogSource, LogStr,
-  MonadLoggerIO, logError, logInfo, runLoggingT)
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Control.Monad.Logger (LoggingT(runLoggingT), Loc, LogLevel,
+  LogSource, LogStr, MonadLoggerIO, logError, logInfo)
 import Data.ByteString (ByteString)
 import Data.List ((\\))
 import Data.Maybe (catMaybes)
@@ -46,20 +40,24 @@ import Data.UUID.V1 (nextUUID)
 import Data.Version (Version, showVersion)
 import Language.Haskell.TH (Code(examineCode), Q, TExp, runIO)
 import Language.Haskell.TH.Syntax (addDependentFile)
-import Network.HTTP.Types (Header, Status, internalServerError500,
-  methodNotAllowed405, movedPermanently301, ok200, statusCode,
-  statusMessage)
+import Network.HTTP.Types (Status(statusCode, statusMessage), Header,
+  internalServerError500, methodNotAllowed405, movedPermanently301, ok200)
 import Network.Mime (defaultMimeLookup)
 import Network.Socket (AddrInfo(addrAddress), Family(AF_INET),
   SocketType(Stream), Socket, close, connect, defaultProtocol,
   getAddrInfo, socket)
 import Network.Socket.ByteString (recv, sendAll)
-import Network.Wai (Application, Middleware, Response, ResponseReceived,
-  mapResponseHeaders, pathInfo, rawPathInfo, rawQueryString,
-  requestMethod, responseLBS, responseRaw, responseStatus)
+import Network.Wai (Request(pathInfo, rawPathInfo, rawQueryString,
+  requestMethod), Application, Middleware, Response, ResponseReceived,
+  mapResponseHeaders, responseLBS, responseRaw, responseStatus)
 import Network.Wai.Handler.Warp (run)
 import OM.Show (showt)
-import Servant.API (ToHttpApiData, toUrlPiece)
+import Prelude (Either(Left, Right), Eq((/=), (==)), Foldable(elem,
+  foldr), Functor(fmap), Maybe(Just, Nothing), Monad((>>), (>>=), return),
+  MonadFail(fail), RealFrac(truncate), Semigroup((<>)), Show(show),
+  Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath, IO, Int,
+  String, concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, zip)
+import Servant.API (ToHttpApiData(toUrlPiece))
 import System.Directory (getDirectoryContents)
 import System.FilePath.Posix ((</>), combine)
 import System.Posix.Files (getFileStatus, isDirectory, isRegularFile)
