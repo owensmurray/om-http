@@ -17,6 +17,7 @@ module OM.HTTP (
   staticPage,
   defaultIndex,
   BearerToken(..),
+  emptyApp,
 ) where
 
 
@@ -41,7 +42,8 @@ import Data.Version (Version, showVersion)
 import Language.Haskell.TH (Code(examineCode), Q, TExp, runIO)
 import Language.Haskell.TH.Syntax (addDependentFile)
 import Network.HTTP.Types (Status(statusCode, statusMessage), Header,
-  internalServerError500, methodNotAllowed405, movedPermanently301, ok200)
+  internalServerError500, methodNotAllowed405, movedPermanently301,
+  ok200, status404)
 import Network.Mime (defaultMimeLookup)
 import Network.Socket (AddrInfo(addrAddress), Family(AF_INET),
   SocketType(Stream), Socket, close, connect, defaultProtocol,
@@ -54,9 +56,10 @@ import Network.Wai.Handler.Warp (run)
 import OM.Show (showt)
 import Prelude (Either(Left, Right), Eq((/=), (==)), Foldable(elem,
   foldr), Functor(fmap), Maybe(Just, Nothing), Monad((>>), (>>=), return),
-  MonadFail(fail), RealFrac(truncate), Semigroup((<>)), Show(show),
-  Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath, IO, Int,
-  String, concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, zip)
+  MonadFail(fail), Monoid(mempty), RealFrac(truncate), Semigroup((<>)),
+  Show(show), Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath,
+  IO, Int, String, concat, drop, filter, fst, id, mapM_, otherwise,
+  putStrLn, zip)
 import Servant.API (ToHttpApiData(toUrlPiece))
 import System.Directory (getDirectoryContents)
 import System.FilePath.Posix ((</>), combine)
@@ -421,5 +424,17 @@ staticSite baseDir = join . runIO $ do
         allContent
           <- mapM (fmap BS8.unpack . BS.readFile . combine baseDir) allFiles
         return (zip (drop 2 <$> allFiles) allContent)
+
+
+{-| A WAI 'Application' that returns 404 not found for everything. -}
+emptyApp :: Application
+emptyApp _req respond =
+  respond
+    (
+      responseLBS
+        status404
+        mempty
+        "not found"
+    )
 
 
