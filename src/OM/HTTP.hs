@@ -29,12 +29,14 @@ import Control.Monad.Logger
   ( LoggingT(runLoggingT), Loc, LogLevel, LogSource, LogStr, MonadLoggerIO
   , logError, logInfo
   )
+import Data.Base64.Types (extractBase64)
 import Data.ByteString (ByteString)
+import Data.ByteString.Base64 (encodeBase64)
 import Data.List ((\\))
 import Data.Maybe (catMaybes)
 import Data.String (IsString(fromString))
 import Data.Text (Text)
-import Data.Text.Encoding (decodeUtf8)
+import Data.Text.Encoding (decodeUtf8')
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import Data.UUID (UUID)
 import Data.UUID.V1 (nextUUID)
@@ -200,8 +202,9 @@ requestLogging logging app req respond =
 
     {- | A Text representation of the request, suitable for logging. -}
     reqStr :: Text
-    reqStr = decodeUtf8
-      $ requestMethod req <> " " <> rawPathInfo req <> rawQueryString req
+    reqStr =
+      decodeUtf8Safe
+        (requestMethod req <> " " <> rawPathInfo req <> rawQueryString req)
 
     {- |
       @instance Show Status@ shows the Haskell structure, which is
@@ -209,7 +212,7 @@ requestLogging logging app req respond =
     -}
     showStatus :: Status -> Text
     showStatus stat =
-      (showt . statusCode) stat <> " " <> (decodeUtf8 . statusMessage) stat
+      (showt . statusCode) stat <> " " <> (decodeUtf8Safe . statusMessage) stat
 
 
 {- |
@@ -441,5 +444,13 @@ emptyApp _req respond =
         mempty
         "not found"
     )
+
+
+{- | Safely decode UTF-8 bytes to Text, replacing invalid sequences with placeholder. -}
+decodeUtf8Safe :: ByteString -> Text
+decodeUtf8Safe bytes =
+  case decodeUtf8' bytes of
+    Left _err -> "<invalid utf8:" <> extractBase64 (encodeBase64 bytes) <> ">"
+    Right val -> val
 
 
