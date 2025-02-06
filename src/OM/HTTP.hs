@@ -65,7 +65,7 @@ import Prelude
   , Maybe(Just, Nothing), Monad((>>), (>>=), return), MonadFail(fail)
   , Monoid(mempty), RealFrac(truncate), Semigroup((<>)), Show(show)
   , Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath, IO, Int, String
-  , concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, zip
+  , concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, seq, zip
   )
 import Servant.API (ToHttpApiData(toUrlPiece))
 import System.Directory (getDirectoryContents)
@@ -194,7 +194,7 @@ requestLogging logging app req respond =
           measurement of the request duration.
         -}
         ack <- liftIO $ respond response
-        now <- liftIO getCurrentTime
+        now <- ack `seq` liftIO getCurrentTime
         $(logInfo)
           $ reqStr <> " --> " <> showStatus (responseStatus response)
           <> " (" <> showt (diffUTCTime now start) <> ")"
