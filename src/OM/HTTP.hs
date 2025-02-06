@@ -23,12 +23,13 @@ module OM.HTTP (
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently_)
-import Control.Exception.Safe (SomeException, bracket, finally, throwM,
-  tryAny)
+import Control.Exception.Safe (SomeException, bracket, finally, throwM, tryAny)
 import Control.Monad (join, void)
 import Control.Monad.IO.Class (MonadIO(liftIO))
-import Control.Monad.Logger (LoggingT(runLoggingT), Loc, LogLevel,
-  LogSource, LogStr, MonadLoggerIO, logError, logInfo)
+import Control.Monad.Logger
+  ( LoggingT(runLoggingT), Loc, LogLevel, LogSource, LogStr, MonadLoggerIO
+  , logError, logInfo
+  )
 import Data.ByteString (ByteString)
 import Data.List ((\\))
 import Data.Maybe (catMaybes)
@@ -41,25 +42,30 @@ import Data.UUID.V1 (nextUUID)
 import Data.Version (Version, showVersion)
 import Language.Haskell.TH (Code(examineCode), Q, TExp, runIO)
 import Language.Haskell.TH.Syntax (addDependentFile)
-import Network.HTTP.Types (Status(statusCode, statusMessage), Header,
-  internalServerError500, methodNotAllowed405, movedPermanently301,
-  ok200, status404)
+import Network.HTTP.Types
+  ( Status(statusCode, statusMessage), Header, internalServerError500
+  , methodNotAllowed405, movedPermanently301, ok200, status404
+  )
 import Network.Mime (defaultMimeLookup)
-import Network.Socket (AddrInfo(addrAddress), Family(AF_INET),
-  SocketType(Stream), Socket, close, connect, defaultProtocol,
-  getAddrInfo, socket)
+import Network.Socket
+  ( AddrInfo(addrAddress), Family(AF_INET), SocketType(Stream), Socket, close
+  , connect, defaultProtocol, getAddrInfo, socket
+  )
 import Network.Socket.ByteString (recv, sendAll)
-import Network.Wai (Request(pathInfo, rawPathInfo, rawQueryString,
-  requestMethod), Application, Middleware, Response, ResponseReceived,
-  mapResponseHeaders, responseLBS, responseRaw, responseStatus)
+import Network.Wai
+  ( Request(pathInfo, rawPathInfo, rawQueryString, requestMethod), Application
+  , Middleware, Response, ResponseReceived, mapResponseHeaders, responseLBS
+  , responseRaw, responseStatus
+  )
 import Network.Wai.Handler.Warp (run)
 import OM.Show (showt)
-import Prelude (Either(Left, Right), Eq((/=), (==)), Foldable(elem,
-  foldr), Functor(fmap), Maybe(Just, Nothing), Monad((>>), (>>=), return),
-  MonadFail(fail), Monoid(mempty), RealFrac(truncate), Semigroup((<>)),
-  Show(show), Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath,
-  IO, Int, String, concat, drop, filter, fst, id, mapM_, otherwise,
-  putStrLn, zip)
+import Prelude
+  ( Either(Left, Right), Eq((/=), (==)), Foldable(elem, foldr), Functor(fmap)
+  , Maybe(Just, Nothing), Monad((>>), (>>=), return), MonadFail(fail)
+  , Monoid(mempty), RealFrac(truncate), Semigroup((<>)), Show(show)
+  , Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath, IO, Int, String
+  , concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, zip
+  )
 import Servant.API (ToHttpApiData(toUrlPiece))
 import System.Directory (getDirectoryContents)
 import System.FilePath.Posix ((</>), combine)
@@ -180,17 +186,18 @@ requestLogging logging app req respond =
   where
     {- | Delegate to the underlying responder, and do some logging. -}
     loggingRespond :: UTCTime -> Response -> IO ResponseReceived
-    loggingRespond start response = (`runLoggingT` logging) $ do
-      {-
-        Execute the underlying responder first so we get an accurate
-        measurement of the request duration.
-      -}
-      ack <- liftIO $ respond response
-      now <- liftIO getCurrentTime
-      $(logInfo)
-        $ reqStr <> " --> " <> showStatus (responseStatus response)
-        <> " (" <> showt (diffUTCTime now start) <> ")"
-      return ack
+    loggingRespond start response =
+      (`runLoggingT` logging) $ do
+        {-
+          Execute the underlying responder first so we get an accurate
+          measurement of the request duration.
+        -}
+        ack <- liftIO $ respond response
+        now <- liftIO getCurrentTime
+        $(logInfo)
+          $ reqStr <> " --> " <> showStatus (responseStatus response)
+          <> " (" <> showt (diffUTCTime now start) <> ")"
+        return ack
 
     {- | A Text representation of the request, suitable for logging. -}
     reqStr :: Text
@@ -229,7 +236,6 @@ logExceptionsAndContinue logging app req respond = (`runLoggingT` logging) $
       Left err -> do
         uuid <- logProblem err
         liftIO $ respond (errResponse uuid)
-
   where
     errResponse :: UUID -> Response
     errResponse uuid =
