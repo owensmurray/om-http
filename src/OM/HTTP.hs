@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 
 {- | Miscellaneous HTTP Utilities. -}
 module OM.HTTP (
@@ -22,12 +22,13 @@ module OM.HTTP (
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently_)
+import Control.Exception (try)
 import Control.Exception.Safe (SomeException, bracket, finally, throwM, tryAny)
 import Control.Monad (join, void)
 import Control.Monad.IO.Class (MonadIO(liftIO))
-import Control.Monad.Logger
-  ( LoggingT(runLoggingT), Loc, LogLevel, LogSource, LogStr, MonadLoggerIO
-  , logError, logInfo
+import Control.Monad.Logger.Aeson
+  ( LoggingT(runLoggingT), Message((:#)), (.=), Loc, LogLevel, LogSource, LogStr
+  , MonadLoggerIO, logError, logInfo
   )
 import Data.Base64.Types (extractBase64)
 import Data.ByteString (ByteString)
@@ -54,18 +55,22 @@ import Network.Socket
   )
 import Network.Socket.ByteString (recv, sendAll)
 import Network.Wai
-  ( Request(pathInfo, rawPathInfo, rawQueryString, requestMethod), Application
-  , Middleware, Response, ResponseReceived, mapResponseHeaders, responseLBS
-  , responseRaw, responseStatus
+  ( Request
+    ( isSecure, pathInfo, rawPathInfo, rawQueryString, remoteHost
+    , requestHeaders, requestMethod
+    )
+  , Application, Middleware, Response, ResponseReceived, mapResponseHeaders
+  , responseLBS, responseRaw, responseStatus
   )
 import Network.Wai.Handler.Warp (run)
 import OM.Show (showt)
 import Prelude
-  ( Either(Left, Right), Eq((/=), (==)), Foldable(elem, foldr), Functor(fmap)
-  , Maybe(Just, Nothing), Monad((>>), (>>=), return), MonadFail(fail)
-  , Monoid(mempty), RealFrac(truncate), Semigroup((<>)), Show(show)
-  , Traversable(mapM), ($), (++), (.), (<$>), (=<<), FilePath, IO, Int, String
-  , concat, drop, filter, fst, id, mapM_, otherwise, putStrLn, seq, zip
+  ( Applicative(pure), Either(Left, Right), Eq((/=), (==))
+  , Foldable(elem, foldr), Functor(fmap), Maybe(Just, Nothing)
+  , Monad((>>), (>>=), return), MonadFail(fail), Monoid(mempty)
+  , RealFrac(truncate), Semigroup((<>)), Show(show), Traversable(mapM), ($)
+  , (++), (.), (<$>), (=<<), FilePath, IO, Int, String, concat, drop, filter
+  , fst, id, mapM_, otherwise, putStrLn, seq, zip
   )
 import Servant.API (ToHttpApiData(toUrlPiece))
 import System.Directory (getDirectoryContents)
@@ -75,6 +80,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
+import qualified Data.CaseInsensitive as CI
 import qualified Data.Text as T
 
 
@@ -172,8 +178,8 @@ overwriteResponseHeader (name, value) app req respond =
   logs that the request has begun. The second messages logs the status
   result and timing of the request once it is finished.
 
-  > Starting request: GET /foo
-  > GET /foo --> 200 Ok (0.001s)
+  > {"text":"Starting request: GET /api/me","meta":{..<request details>..}}
+  > {"text":"Request complete: GET /api/me","meta":{"status":"200 OK","time":"0.000370671s"}}
 
   This can help debugging requests that hang or crash for whatever reason.
 -}
@@ -182,8 +188,30 @@ requestLogging
   -> Middleware
 requestLogging logging app req respond =
     (`runLoggingT` logging) $ do
-      $(logInfo) $ "Starting request: " <> reqStr
-      liftIO . app req . loggingRespond =<< liftIO getCurrentTime
+      logInfo $ "Starting request: " <> reqStr :#
+        [ "method" .= decodeUtf8Safe (requestMethod req)
+        , "path" .= decodeUtf8Safe (rawPathInfo req)
+        , "query" .= decodeUtf8Safe (rawQueryString req)
+        , "secure" .= isSecure req
+        , "remote_host" .= show (remoteHost req)
+        , "headers" .=
+            fmap
+              (\(name, val) ->
+                decodeUtf8Safe (CI.original name)
+                <> ": "
+                <> decodeUtf8Safe val
+              )
+              (requestHeaders req)
+        ]
+      now <- liftIO getCurrentTime
+      liftIO (try (app req (loggingRespond now))) >>= \case
+        Left err -> do
+          logError $
+            "`app` failed with exception. The exception will be re-thrown." :#
+            [ "exception" .= show (err :: SomeException)
+            ]
+          throwM err
+        Right val -> pure val
   where
     {- | Delegate to the underlying responder, and do some logging. -}
     loggingRespond :: UTCTime -> Response -> IO ResponseReceived
@@ -193,11 +221,18 @@ requestLogging logging app req respond =
           Execute the underlying responder first so we get an accurate
           measurement of the request duration.
         -}
-        ack <- liftIO $ respond response
+        ack <- liftIO (try (respond response)) >>= \case
+          Left err -> do
+            logError $
+              "`respond` failed with exception. The exception will be re-thrown." :#
+              ["exception" .= show (err :: SomeException)]
+            throwM err
+          Right ack -> pure ack
         now <- ack `seq` liftIO getCurrentTime
-        $(logInfo)
-          $ reqStr <> " --> " <> showStatus (responseStatus response)
-          <> " (" <> showt (diffUTCTime now start) <> ")"
+        logInfo $ "Request complete: " <> reqStr :#
+          [ "status" .= showStatus (responseStatus response)
+          , "time" .= show (diffUTCTime now start)
+          ]
         return ack
 
     {- | A Text representation of the request, suitable for logging. -}
@@ -262,9 +297,10 @@ logExceptionsAndContinue logging app req respond = (`runLoggingT` logging) $
     logProblem :: (MonadLoggerIO m) => SomeException -> m UUID
     logProblem err = do
       uuid <- getUUID
-      $(logError)
-        $ "Internal Server Error [" <> showt uuid <> "]: "
-        <> showt err
+      logError $ "Internal Server Error" :#
+        [ "exception" .= show err
+        , "id" .= uuid
+        ]
       return uuid
 
 
