@@ -392,7 +392,7 @@ staticSite baseDir = join . runIO $ do
                     )
                 else app req respond
         in
-          foldr (.) id (fmap static files) :: Middleware
+          foldr ((.) . static) id files :: Middleware
       ||]
   where
     printResource :: String -> IO ()
