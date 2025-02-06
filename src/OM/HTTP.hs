@@ -1,7 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 {- | Miscellaneous HTTP Utilities. -}
 module OM.HTTP (
