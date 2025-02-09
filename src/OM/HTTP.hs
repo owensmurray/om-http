@@ -22,7 +22,8 @@ module OM.HTTP (
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently_)
-import Control.Exception (try)
+import Control.Exception (someExceptionContext, try)
+import Control.Exception.Context (displayExceptionContext)
 import Control.Exception.Safe (SomeException, bracket, finally, throwM, tryAny)
 import Control.Monad (join, void)
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -30,6 +31,7 @@ import Control.Monad.Logger.Aeson
   ( LoggingT(runLoggingT), Message((:#)), (.=), Loc, LogLevel, LogSource, LogStr
   , MonadLoggerIO, logError, logInfo
   )
+import Data.Aeson (object)
 import Data.Base64.Types (extractBase64)
 import Data.ByteString (ByteString)
 import Data.ByteString.Base64 (encodeBase64)
@@ -60,7 +62,7 @@ import Network.Wai
     , requestHeaders, requestMethod
     )
   , Application, Middleware, Response, ResponseReceived, mapResponseHeaders
-  , responseLBS, responseRaw, responseStatus
+  , responseHeaders, responseLBS, responseRaw, responseStatus
   )
 import Network.Wai.Handler.Warp (run)
 import OM.Show (showt)
@@ -209,6 +211,7 @@ requestLogging logging app req respond =
           logError $
             "`app` failed with exception. The exception will be re-thrown." :#
             [ "exception" .= show (err :: SomeException)
+            , "context" .= displayExceptionContext (someExceptionContext err)
             ]
           throwM err
         Right val -> pure val
@@ -225,7 +228,20 @@ requestLogging logging app req respond =
           Left err -> do
             logError $
               "`respond` failed with exception. The exception will be re-thrown." :#
-              ["exception" .= show (err :: SomeException)]
+              [ "exception" .= show (err :: SomeException)
+              , "context" .= displayExceptionContext (someExceptionContext err)
+              , "response" .= object
+                  [ "status" .= showStatus (responseStatus response)
+                  , "headers" .=
+                      fmap
+                        (\(name, val) ->
+                          decodeUtf8Safe (CI.original name)
+                          <> ": "
+                          <> decodeUtf8Safe val
+                        )
+                        (responseHeaders response)
+                  ]
+              ]
             throwM err
           Right ack -> pure ack
         now <- ack `seq` liftIO getCurrentTime
@@ -299,6 +315,7 @@ logExceptionsAndContinue logging app req respond = (`runLoggingT` logging) $
       uuid <- getUUID
       logError $ "Internal Server Error" :#
         [ "exception" .= show err
+        , "context" .= displayExceptionContext (someExceptionContext err)
         , "id" .= uuid
         ]
       return uuid
