@@ -37,6 +37,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Base64 (encodeBase64)
 import Data.List ((\\))
 import Data.Maybe (catMaybes)
+import Data.Set (Set, member)
 import Data.String (IsString(fromString))
 import Data.Text (Text)
 import Data.Text.Encoding (decodeUtf8')
@@ -47,8 +48,9 @@ import Data.Version (Version, showVersion)
 import Language.Haskell.TH (Code(examineCode), Q, TExp, runIO)
 import Language.Haskell.TH.Syntax (addDependentFile)
 import Network.HTTP.Types
-  ( Status(statusCode, statusMessage), Header, internalServerError500
-  , methodNotAllowed405, movedPermanently301, ok200, status404
+  ( Status(statusCode, statusMessage), Header, HeaderName
+  , internalServerError500, methodNotAllowed405, movedPermanently301, ok200
+  , status404
   )
 import Network.Mime (defaultMimeLookup)
 import Network.Socket
@@ -99,7 +101,7 @@ runTlsRedirect
   -> IO ()
 runTlsRedirect logging serverName serverVersion url =
   run 80
-    . requestLogging logging
+    . requestLogging logging mempty
     . setServer serverName serverVersion
     . hstsDirective 600
     . logExceptionsAndContinue logging
@@ -187,8 +189,9 @@ overwriteResponseHeader (name, value) app req respond =
 -}
 requestLogging
   :: (Loc -> LogSource -> LogLevel -> LogStr -> IO ())
+  -> Set HeaderName {-^ Headers to redact -}
   -> Middleware
-requestLogging logging app req respond =
+requestLogging logging redactHeaders app req respond =
     (`runLoggingT` logging) $ do
       logInfo $ "Starting request: " <> reqStr :#
         [ "method" .= decodeUtf8Safe (requestMethod req)
@@ -201,7 +204,9 @@ requestLogging logging app req respond =
               (\(name, val) ->
                 decodeUtf8Safe (CI.original name)
                 <> ": "
-                <> decodeUtf8Safe val
+                <> if name `member` redactHeaders
+                     then "<redacted>"
+                     else decodeUtf8Safe val
               )
               (requestHeaders req)
         ]
