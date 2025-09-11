@@ -66,7 +66,9 @@ import Network.Wai
   , Application, Middleware, Response, ResponseReceived, mapResponseHeaders
   , responseHeaders, responseLBS, responseRaw, responseStatus
   )
-import Network.Wai.Handler.Warp (run)
+import Network.Wai.Handler.Warp
+  ( HostPreference, Settings, defaultSettings, runSettings, setHost, setPort
+  )
 import OM.Show (showt)
 import Prelude
   ( Applicative(pure), Either(Left, Right), Eq((/=), (==))
@@ -95,17 +97,24 @@ import qualified Data.Text as T
 -}
 runTlsRedirect
   :: (Loc -> LogSource -> LogLevel -> LogStr -> IO ()) {- ^ Logging backend. -}
+  -> HostPreference
   -> ByteString {- ^ Server name. -}
   -> Version {- ^ Server version. -}
   -> ByteString {- ^ Target URL. -}
   -> IO ()
-runTlsRedirect logging serverName serverVersion url =
-  run 80
-    . requestLogging logging mempty
-    . setServer serverName serverVersion
-    . hstsDirective 600
-    . logExceptionsAndContinue logging
-    $ tlsRedirect url
+runTlsRedirect logging host serverName serverVersion url =
+    runSettings settings
+      . requestLogging logging mempty
+      . setServer serverName serverVersion
+      . hstsDirective 600
+      . logExceptionsAndContinue logging
+      $ tlsRedirect url
+  where
+    settings :: Settings
+    settings =
+      setPort 80
+      . setHost host
+      $ defaultSettings
 
 
 {- |
