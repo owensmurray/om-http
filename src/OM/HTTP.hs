@@ -1,6 +1,18 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ExplicitNamespaces #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 {- | Miscellaneous HTTP Utilities. -}
 module OM.HTTP (
@@ -17,6 +29,7 @@ module OM.HTTP (
   defaultIndex,
   BearerToken(..),
   emptyApp,
+  EarlyHost,
 ) where
 
 
@@ -37,6 +50,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Base64 (encodeBase64)
 import Data.List ((\\))
 import Data.Maybe (catMaybes)
+import Data.Proxy (Proxy(Proxy))
 import Data.Set (Set, member)
 import Data.String (IsString(fromString))
 import Data.Text (Text)
@@ -45,6 +59,7 @@ import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import Data.UUID (UUID)
 import Data.UUID.V1 (nextUUID)
 import Data.Version (Version, showVersion)
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 import Language.Haskell.TH (Code(examineCode), Q, TExp, runIO)
 import Language.Haskell.TH.Syntax (addDependentFile)
 import Network.HTTP.Types
@@ -61,7 +76,7 @@ import Network.Socket.ByteString (recv, sendAll)
 import Network.Wai
   ( Request
     ( isSecure, pathInfo, rawPathInfo, rawQueryString, remoteHost
-    , requestHeaders, requestMethod
+    , requestHeaderHost, requestHeaders, requestMethod
     )
   , Application, Middleware, Response, ResponseReceived, mapResponseHeaders
   , responseHeaders, responseLBS, responseRaw, responseStatus
@@ -78,7 +93,17 @@ import Prelude
   , (++), (.), (<$>), (=<<), FilePath, IO, Int, String, concat, drop, filter
   , fst, id, mapM_, otherwise, putStrLn, seq, zip
   )
-import Servant.API (ToHttpApiData(toUrlPiece))
+import Servant.API (ToHttpApiData(toUrlPiece), type (:>))
+import Servant.Server
+  ( ErrorFormatters(notFoundErrorFormatter), HasContextEntry(getContextEntry)
+  , HasServer(ServerT, hoistServerWithContext, route), ServerError(errBody)
+  , Context, NotFoundErrorFormatter, Server, err400
+  )
+import Servant.Server.Internal
+  ( RouteResult(Fail, FailFatal), Router'(RawRouter), Delayed
+  , MkContextWithErrorFormatter, Router, mkContextWithErrorFormatter
+  , runRouterEnv
+  )
 import System.Directory (getDirectoryContents)
 import System.FilePath.Posix ((</>), combine)
 import System.Posix.Files (getFileStatus, isDirectory, isRegularFile)
@@ -519,5 +544,100 @@ decodeUtf8Safe bytes =
   case decodeUtf8' bytes of
     Left _err -> "<invalid utf8:" <> extractBase64 (encodeBase64 bytes) <> ">"
     Right val -> val
+
+
+{- | A better 'Servant.API.Host'.
+
+With 'Servant.API.Host', authentication runs before the host
+check, so an earlier app can reject a request that belongs to a
+later host. 'EarlyHost' keeps each virtual host to its own
+requests, and a request for another host stays available to that
+host.
+-}
+data EarlyHost (host :: Symbol)
+instance
+  ( KnownSymbol host
+  , HasServer api context
+  , HasContextEntry
+      (MkContextWithErrorFormatter context)
+      ErrorFormatters
+  )
+  => HasServer (EarlyHost host :> api) context
+  where
+  type ServerT (EarlyHost host :> api) m =
+    ServerT api m
+
+  hoistServerWithContext _ contextProxy nat =
+    hoistServerWithContext (Proxy @api) contextProxy nat
+
+  route
+    :: forall env
+     . Proxy (EarlyHost host :> api)
+    -> Context context
+    -> Delayed env (Server (EarlyHost host :> api))
+    -> Router env
+  route _ context delayed =
+    let
+      inner :: Router env
+      inner =
+        route (Proxy @api) context delayed
+
+      notFound :: NotFoundErrorFormatter
+      notFound =
+        notFoundErrorFormatter
+          (getContextEntry (mkContextWithErrorFormatter context))
+    in
+      RawRouter (dispatchHost (Proxy @host) notFound inner)
+    where
+      {- | Compare the Host header to the combinator's hostname.
+
+      The comparison is the same exact 'String' match as
+      'Servant.API.Host', including any port. A mismatch is 'Fail', so
+      the next virtual host can still run.
+      -}
+      dispatchHost
+        :: Proxy host
+        -> NotFoundErrorFormatter
+        -> Router env
+        -> env
+        -> Request
+        -> (RouteResult Response -> IO ResponseReceived)
+        -> IO ResponseReceived
+      dispatchHost
+          proxy
+          formatNotFound
+          router
+          env
+          request
+          respond
+        =
+          case requestHeaderHost request of
+            Just hostHeader
+              | BS8.unpack hostHeader == symbolVal proxy ->
+                  runRouterEnv
+                    formatNotFound
+                    router
+                    env
+                    request
+                    (respond . promoteHost)
+            _ ->
+              respond (Fail invalidHost)
+          where
+            {- | Keep a miss on the matched host from falling through.
+
+            'Fail' from the inner router becomes 'FailFatal' with the same
+            error. 'FailFatal' and 'Route' are unchanged.
+            -}
+            promoteHost :: RouteResult Response -> RouteResult Response
+            promoteHost (Fail err) =
+              FailFatal err
+            promoteHost result =
+              result
+
+            invalidHost :: ServerError
+            invalidHost =
+              err400
+                { errBody = "Invalid host"
+                }
 
 
